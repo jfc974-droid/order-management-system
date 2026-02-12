@@ -387,4 +387,337 @@ def create_production_report():
         return "\n".join(output), None, pdf_filename
         
     except Exception as e:
+def export_order_forms(school_name):
+    """Generate order forms for a specific school"""
+    output = []
+    
+    try:
+        creds = get_credentials()
+        gc = gspread.authorize(creds)
+        docs_service = build('docs', 'v1', credentials=creds)
+        drive_service = build('drive', 'v3', credentials=creds)
+        
+        # Find template
+        template_query = "name='Order Template for PDF' and mimeType='application/vnd.google-apps.document'"
+        template_results = drive_service.files().list(q=template_query).execute()
+        templates = template_results.get('files', [])
+        
+        if not templates:
+            return "\n".join(output), "Template 'Order Template for PDF' not found!", None
+        
+        TEMPLATE_ID = templates[0]['id']
+        output.append(f"Found template")
+        
+        # Read from school-specific sheet
+        spreadsheet = gc.open('MASTER SPRING 2026')
+        
+        try:
+            school_sheet = spreadsheet.worksheet(f"{school_name} MASTER")
+        except:
+            return "\n".join(output), f"Sheet '{school_name} MASTER' not found!", None
+        
+        data = school_sheet.get_all_values()
+        rows = data[1:]
+        
+        output.append(f"Found {len(rows)} rows in {school_name} MASTER")
+        
+        # Column indices in school sheet: A, AW, AY, Q, R, S, O, Y, AV
+        col_order_num = 0
+        col_student = 1
+        col_grade = 2
+        col_quantity = 3
+        col_flavor = 4
+        col_price = 5
+        col_delivery = 6
+        col_billing = 7
+        col_school = 8
+        
+        # Filter for pick-up orders
+        pickup_orders = []
+        for row in rows:
+            if len(row) > col_delivery and row[col_delivery] == 'Pick-up at school':
+                pickup_orders.append(row)
+        
+        output.append(f"Found {len(pickup_orders)} pick-up orders")
+        
+        # Group orders
+        orders = {}
+        
+        for row in pickup_orders:
+            order_num = row[col_order_num]
+            quantity = int(row[col_quantity]) if row[col_quantity].isdigit() else 0
+            flavor = row[col_flavor]
+            
+            student_name = row[col_student] if len(row) > col_student else ''
+            student_grade = row[col_grade] if len(row) > col_grade else ''
+            billing_name = row[col_billing] if len(row) > col_billing else ''
+            school = row[col_school] if len(row) > col_school else ''
+            
+            if order_num not in orders:
+                orders[order_num] = {
+                    'order_number': order_num,
+                    'billing_name': billing_name,
+                    'school': school,
+                    'student_name': student_name,
+                    'student_grade': student_grade,
+                    'items': []
+                }
+            
+            orders[order_num]['items'].append({'flavor': flavor, 'quantity': quantity})
+        
+        output.append(f"Grouped into {len(orders)} unique orders")
+        
+        if len(orders) == 0:
+            return "\n".join(output), "No pick-up orders found for this school", None
+        
+        # Sort orders by grade then student name
+        def grade_sort_key(grade):
+            grade_upper = grade.upper().strip()
+            if grade_upper == 'K' or grade_upper.startswith('KINDER'):
+                return (0, '')
+            if grade_upper.isdigit():
+                return (int(grade_upper), '')
+            if grade_upper and grade_upper[0].isdigit():
+                return (int(grade_upper[0]), grade_upper)
+            return (999, grade_upper)
+        
+        sorted_orders = sorted(
+            orders.items(),
+            key=lambda x: (grade_sort_key(x[1]['student_grade']), x[1]['student_name'])
+        )
+        
+        # Create PDFs
+        pdf_files = []
+        
+        for order_idx, (order_num, order) in enumerate(sorted_orders):
+            output.append(f"Creating document {order_idx + 1}/{len(sorted_orders)}...")
+            
+            # Copy template
+            copy_title = f"Grade {order['student_grade']} - {order['student_name']} - Order {order_num}"
+            order_copy = drive_service.files().copy(
+                fileId=TEMPLATE_ID,
+                body={'name': copy_title}
+            ).execute()
+            order_copy_id = order_copy.get('id')
+            
+            # Build replacements
+            all_requests = []
+            
+            main_replacements = [
+                ('{{Order Number}}', order['order_number']),
+                ('{{Billing Name}}', order['billing_name']),
+                ('{{Student name}}', order['student_name']),
+                ('{{student name}}', order['student_name']),
+                ('{{Grade}}', order['student_grade']),
+                ('{{School}}', order['school'])
+            ]
+            
+            for placeholder, value in main_replacements:
+                all_requests.append({
+                    'replaceAllText': {
+                        'containsText': {'text': placeholder, 'matchCase': True},
+                        'replaceText': value
+                    }
+                })
+            
+            # Item replacements
+            for i in range(1, 14):
+                item_index = i - 1
+                
+                if item_index < len(order['items']):
+                    item = order['items'][item_index]
+                    qty_value = str(item['quantity'])
+                    flavor_value = item['flavor']
+                else:
+                    qty_value = ''
+                    flavor_value = ''
+                
+                qty_placeholder = '{{quantity' + str(i) + '}}'
+                all_requests.append({
+                    'replaceAllText': {
+                        'containsText': {'text': qty_placeholder, 'matchCase': True},
+                        'replaceText': qty_value
+                    }
+                })
+                
+                flavor_placeholder = '{{flavor name' + str(i) + '}}'
+                all_requests.append({
+                    'replaceAllText': {
+                        'containsText': {'text': flavor_placeholder, 'matchCase': True},
+                        'replaceText': flavor_value
+                    }
+                })
+            
+            # Apply replacements
+            docs_service.documents().batchUpdate(
+                documentId=order_copy_id,
+                body={'requests': all_requests}
+            ).execute()
+            
+            # Calculate popcorn vs coffee
+            popcorn_count = 0
+            coffee_count = 0
+            
+            for item in order['items']:
+                flavor = item['flavor'].lower()
+                quantity = item['quantity']
+                
+                if 'coffee' in flavor:
+                    coffee_count += quantity
+                else:
+                    popcorn_count += quantity
+            
+            # Get document to find items table end
+            doc = docs_service.documents().get(documentId=order_copy_id).execute()
+            content = doc.get('body').get('content')
+            
+            items_table_end = None
+            for element in content:
+                if 'table' in element:
+                    table = element.get('table')
+                    table_text = ""
+                    
+                    for row in table.get('tableRows', []):
+                        for cell in row.get('tableCells', []):
+                            for cell_content in cell.get('content', []):
+                                if 'paragraph' in cell_content:
+                                    for elem in cell_content.get('paragraph', {}).get('elements', []):
+                                        if 'textRun' in elem:
+                                            table_text += elem.get('textRun', {}).get('content', '')
+                    
+                    if 'Quantity' in table_text and 'Flavor' in table_text:
+                        items_table_end = element.get('endIndex')
+                        break
+            
+            # Insert summary
+            if items_table_end:
+                popcorn_label = "bag" if popcorn_count == 1 else "bags"
+                coffee_label = "bag" if coffee_count == 1 else "bags"
+                summary_text = f"\n\nPopcorn: {popcorn_count} {popcorn_label}     Coffee: {coffee_count} {coffee_label}\n"
+                
+                summary_requests = [
+                    {
+                        'insertText': {
+                            'location': {'index': items_table_end},
+                            'text': summary_text
+                        }
+                    },
+                    {
+                        'updateTextStyle': {
+                            'range': {
+                                'startIndex': items_table_end,
+                                'endIndex': items_table_end + len(summary_text)
+                            },
+                            'textStyle': {
+                                'bold': True,
+                                'fontSize': {'magnitude': 12, 'unit': 'PT'},
+                                'weightedFontFamily': {
+                                    'fontFamily': 'Lexend',
+                                    'weight': 700
+                                }
+                            },
+                            'fields': 'bold,fontSize,weightedFontFamily'
+                        }
+                    }
+                ]
+                
+                docs_service.documents().batchUpdate(
+                    documentId=order_copy_id,
+                    body={'requests': summary_requests}
+                ).execute()
+            
+            # Delete empty rows
+            num_items = len(order['items'])
+            if num_items < 13:
+                doc = docs_service.documents().get(documentId=order_copy_id).execute()
+                content = doc.get('body').get('content')
+                
+                items_table = None
+                items_table_start = None
+                
+                for element in content:
+                    if 'table' in element:
+                        table = element.get('table')
+                        table_text = ""
+                        
+                        for row in table.get('tableRows', []):
+                            for cell in row.get('tableCells', []):
+                                for cell_content in cell.get('content', []):
+                                    if 'paragraph' in cell_content:
+                                        for elem in cell_content.get('paragraph', {}).get('elements', []):
+                                            if 'textRun' in elem:
+                                                table_text += elem.get('textRun', {}).get('content', '')
+                        
+                        if 'Quantity' in table_text and 'Flavor' in table_text:
+                            items_table = table
+                            items_table_start = element.get('startIndex')
+                            break
+                
+                if items_table and items_table_start:
+                    num_rows = len(items_table.get('tableRows', []))
+                    delete_requests = []
+                    rows_to_delete = num_rows - (num_items + 1)
+                    
+                    if rows_to_delete > 0:
+                        for i in range(rows_to_delete):
+                            delete_requests.append({
+                                'deleteTableRow': {
+                                    'tableCellLocation': {
+                                        'tableStartLocation': {'index': items_table_start},
+                                        'rowIndex': num_items + 1,
+                                        'columnIndex': 0
+                                    }
+                                }
+                            })
+                        
+                        if delete_requests:
+                            docs_service.documents().batchUpdate(
+                                documentId=order_copy_id,
+                                body={'requests': delete_requests}
+                            ).execute()
+            
+            # Export as PDF
+            request = drive_service.files().export_media(
+                fileId=order_copy_id,
+                mimeType='application/pdf'
+            )
+            
+            pdf_filename = f"temp_{order_idx}.pdf"
+            fh = io.FileIO(pdf_filename, 'wb')
+            downloader = MediaIoBaseDownload(fh, request)
+            done = False
+            while done is False:
+                status, done = downloader.next_chunk()
+            fh.close()
+            
+            pdf_files.append(pdf_filename)
+            
+            # Delete the temporary Google Doc
+            drive_service.files().delete(fileId=order_copy_id).execute()
+        
+        output.append(f"Created {len(sorted_orders)} PDFs")
+        
+        # Combine PDFs
+        merger = PdfMerger()
+        for pdf_file in pdf_files:
+            merger.append(pdf_file)
+        
+        combined_pdf_filename = f"{school_name.replace(' ', '_')}_Orders_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+        merger.write(combined_pdf_filename)
+        merger.close()
+        
+        # Clean up temp files
+        for pdf_file in pdf_files:
+            try:
+                os.remove(pdf_file)
+            except:
+                pass
+        
+        output.append(f"Combined PDF created: {combined_pdf_filename}")
+        
+        return "\n".join(output), None, combined_pdf_filename
+        
+    except Exception as e:
+        return "\n".join(output), str(e), None        
         return "\n".join(output), str(e), None
+
