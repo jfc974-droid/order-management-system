@@ -197,29 +197,33 @@ for school_name, school_orders in schools.items():
         print(f"    ✓ Added {len(data_to_add)} orders")
     
     else:
-        # Existing sheet - check which orders are new
-        existing_data = school_sheet.get_all_values()
-        existing_order_nums = set()
-        
-        if len(existing_data) > 1:
-            # Get existing order numbers (column A)
-            for row in existing_data[1:]:
-                if row and row[0]:
-                    existing_order_nums.add(row[0])
-        
-        # Find new orders
-        new_orders = []
-        for order in school_orders:
-            order_num = order['data'][0]
-            if order_num not in existing_order_nums:
-                new_orders.append(order['data'])
-        
-        if new_orders:
-            school_sheet.append_rows(new_orders)
-            print(f"    ✓ Added {len(new_orders)} new orders")
-        else:
-            print(f"    ✓ No new orders to add")
+                # Existing sheet - check which orders are new
+                existing_data = school_sheet.get_all_values()
+                existing_order_nums = set()
+                
+                if len(existing_data) > 1:
+                    # Get existing order numbers (column A)
+                    for row in existing_data[1:]:
+                        if row and row[0]:
+                            existing_order_nums.add(row[0])
+                
+                # Find new orders
+                new_orders = []
+                for order in school_orders:
+                    order_num = order['data'][0]
+                    if order_num not in existing_order_nums:
+                        new_orders.append(order['data'])
+                
+                if new_orders:
+                    # Sort new orders by order number (descending) and insert at top
+                    new_orders.sort(key=lambda x: int(x[0]) if x[0].isdigit() else 0, reverse=True)
+                    # Insert new rows starting at row 2 (after header)
+                    school_sheet.insert_rows(new_orders, row=2)
+                    print(f"    ✓ Added {len(new_orders)} new orders at the top")
+                else:
+                    print(f"    ✓ No new orders to add")
 
 print(f"\n✅ COMPLETE!")
 print(f"Processed {len(schools)} schools")
+
 print(f"MASTER sheet rows are now color-coded by school")
