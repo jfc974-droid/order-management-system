@@ -418,6 +418,17 @@ def export_order_forms(school_name):
         docs_service = build('docs', 'v1', credentials=creds)
         drive_service = build('drive', 'v3', credentials=creds)
         
+        # Find the temp folder
+        temp_folder_query = "name='Order Forms Temp' and mimeType='application/vnd.google-apps.folder'"
+        temp_folder_results = drive_service.files().list(q=temp_folder_query).execute()
+        temp_folders = temp_folder_results.get('files', [])
+        
+        if not temp_folders:
+            return "\n".join(output), "Folder 'Order Forms Temp' not found or not shared with service account!", None
+        
+        TEMP_FOLDER_ID = temp_folders[0]['id']
+        output.append("Found temp folder")
+        
         # Find template
         template_query = "name='Order Template for PDF' and mimeType='application/vnd.google-apps.document'"
         template_results = drive_service.files().list(q=template_query).execute()
@@ -427,7 +438,7 @@ def export_order_forms(school_name):
             return "\n".join(output), "Template 'Order Template for PDF' not found!", None
         
         TEMPLATE_ID = templates[0]['id']
-        output.append(f"Found template")
+        output.append("Found template")
         
         # Read from school-specific sheet
         spreadsheet = gc.open('MASTER SPRING 2026')
@@ -507,19 +518,27 @@ def export_order_forms(school_name):
             key=lambda x: (grade_sort_key(x[1]['student_grade']), x[1]['student_name'])
         )
         
+        # Limit to prevent timeout
+        max_orders = min(len(sorted_orders), 50)
+        if len(sorted_orders) > 50:
+            output.append(f"WARNING: Processing only first 50 of {len(sorted_orders)} orders to prevent timeout")
+            sorted_orders = sorted_orders[:50]
+        
         # Create PDFs
         pdf_files = []
+        temp_doc_ids = []
         
         for order_idx, (order_num, order) in enumerate(sorted_orders):
             output.append(f"Creating document {order_idx + 1}/{len(sorted_orders)}...")
             
-            # Copy template
+            # Copy template to temp folder
             copy_title = f"Grade {order['student_grade']} - {order['student_name']} - Order {order_num}"
             order_copy = drive_service.files().copy(
                 fileId=TEMPLATE_ID,
-                body={'name': copy_title}
+                body={'name': copy_title, 'parents': [TEMP_FOLDER_ID]}
             ).execute()
             order_copy_id = order_copy.get('id')
+            temp_doc_ids.append(order_copy_id)
             
             # Build replacements
             all_requests = []
@@ -712,11 +731,16 @@ def export_order_forms(school_name):
             fh.close()
             
             pdf_files.append(pdf_filename)
-            
-            # Delete the temporary Google Doc
-            drive_service.files().delete(fileId=order_copy_id).execute()
         
         output.append(f"Created {len(sorted_orders)} PDFs")
+        
+        # Clean up temporary Google Docs
+        output.append("Cleaning up temporary documents...")
+        for doc_id in temp_doc_ids:
+            try:
+                drive_service.files().delete(fileId=doc_id).execute()
+            except:
+                pass
         
         # Combine PDFs
         merger = PdfMerger()
@@ -727,7 +751,7 @@ def export_order_forms(school_name):
         merger.write(combined_pdf_filename)
         merger.close()
         
-        # Clean up temp files
+        # Clean up temp PDF files
         for pdf_file in pdf_files:
             try:
                 os.remove(pdf_file)
