@@ -184,19 +184,25 @@ def organize_schools():
                 })
                 
                 data_to_add = [order['data'] for order in school_orders]
+                data_to_add.sort(key=lambda x: int(x[0]) if x[0].isdigit() else 0, reverse=True)
                 if data_to_add:
                     school_sheet.append_rows(data_to_add)
                 
                 output.append(f"Created {sheet_name} with {len(data_to_add)} orders")
             else:
+                # Existing sheet - get all existing data and re-sort everything
                 existing_data = school_sheet.get_all_values()
                 existing_order_nums = set()
                 
+                # Skip header, get all existing orders
+                all_existing_orders = []
                 if len(existing_data) > 1:
                     for row in existing_data[1:]:
                         if row and row[0]:
                             existing_order_nums.add(row[0])
+                            all_existing_orders.append(row)
                 
+                # Find new orders
                 new_orders = []
                 for order in school_orders:
                     order_num = order['data'][0]
@@ -204,10 +210,23 @@ def organize_schools():
                         new_orders.append(order['data'])
                 
                 if new_orders:
-                    school_sheet.append_rows(new_orders)
                     output.append(f"Added {len(new_orders)} new orders to {sheet_name}")
-                else:
-                    output.append(f"No new orders for {sheet_name}")
+                
+                # Combine all orders (existing + new) and sort by order number descending
+                all_orders = all_existing_orders + new_orders
+                all_orders.sort(key=lambda x: int(x[0]) if x[0].isdigit() else 0, reverse=True)
+                
+                # Clear sheet and rewrite with sorted data
+                school_sheet.clear()
+                school_sheet.update(values=[new_headers], range_name='A1:I1')
+                school_sheet.format('A1:I1', {
+                    'backgroundColor': {'red': 0.2, 'green': 0.2, 'blue': 0.2},
+                    'textFormat': {'foregroundColor': {'red': 1, 'green': 1, 'blue': 1}, 'bold': True}
+                })
+                if all_orders:
+                    school_sheet.append_rows(all_orders)
+                
+                output.append(f"Sheet re-sorted with {len(all_orders)} total orders")
         
         output.append(f"\nCOMPLETE! Processed {len(schools)} schools")
         
@@ -387,6 +406,8 @@ def create_production_report():
         return "\n".join(output), None, pdf_filename
         
     except Exception as e:
+        return "\n".join(output), str(e), None
+
 def export_order_forms(school_name):
     """Generate order forms for a specific school"""
     output = []
@@ -718,6 +739,4 @@ def export_order_forms(school_name):
         return "\n".join(output), None, combined_pdf_filename
         
     except Exception as e:
-        return "\n".join(output), str(e), None        
         return "\n".join(output), str(e), None
-
