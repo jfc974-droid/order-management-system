@@ -101,7 +101,7 @@ try:
             else:
                 st.warning("No school sheets found. Please run 'Update School Sheets' first.")
                 
-        except Exception as e:
+except Exception as e:
             st.error(f"Error loading schools: {str(e)}")
         
         st.markdown("---")
@@ -177,6 +177,7 @@ try:
         st.markdown("---")
 
         st.markdown("**Need help?** Contact the administrator")
+
 
 
 
