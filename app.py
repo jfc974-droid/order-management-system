@@ -53,13 +53,12 @@ if check_password():
     
     with col1:
         st.header("🏫 Order Processing")
-st.header("🏫 Order Processing")
         
         # Generate Order Forms with school selector
-st.subheader("📄 Generate Order Forms")
+        st.subheader("📄 Generate Order Forms")
         
         # Get list of schools from spreadsheet
-try:
+        try:
             import gspread
             creds = scripts.get_credentials()
             gc = gspread.authorize(creds)
@@ -101,10 +100,8 @@ try:
             else:
                 st.warning("No school sheets found. Please run 'Update School Sheets' first.")
                 
-except Exception as e:
+        except Exception as e:
             st.error(f"Error loading schools: {str(e)}")
-        
-        st.markdown("---")
         
         st.markdown("---")
         
@@ -168,6 +165,7 @@ except Exception as e:
         **Order Management System**
         
         This dashboard allows you to:
+        - Generate order forms for any school
         - Update and organize school data
         - Generate production reports
         
@@ -175,10 +173,4 @@ except Exception as e:
         """)
         
         st.markdown("---")
-
         st.markdown("**Need help?** Contact the administrator")
-
-
-
-
-
