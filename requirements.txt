@@ -9,4 +9,7 @@ fuzzywuzzy
 python-Levenshtein
 reportlab
 streamlit
+python-docx
+docx2pdf
+
 
