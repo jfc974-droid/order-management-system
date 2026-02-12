@@ -56,53 +56,55 @@ if check_password():
 st.header("🏫 Order Processing")
         
         # Generate Order Forms with school selector
-st.subheader("📄 Generate Order Forms")
-
-# Get list of schools from spreadsheet
-try:
-import gspread
-creds = scripts.get_credentials()
-gc = gspread.authorize(creds)
-spreadsheet = gc.open('MASTER SPRING 2026')
-all_sheets = spreadsheet.worksheets()
-school_sheets = [sheet.title.replace(' MASTER', '') for sheet in all_sheets if sheet.title.endswith(' MASTER') and sheet.title != 'MASTER']
-
-if school_sheets:
-selected_school = st.selectbox(
-"Select School:",
-options=sorted(school_sheets),
-key="school_selector"
-)
-
-if st.button("🖨️ Generate Order Forms", use_container_width=True, key="generate_forms"):
-with st.spinner(f"Generating order forms for {selected_school}..."):
-try:
-result, error, pdf_file = scripts.export_order_forms(selected_school)
-
-if error:
-st.error(f"Error: {error}")
-else:
-st.success(f"Order forms generated for {selected_school}!")
-
-if pdf_file and os.path.exists(pdf_file):
-with open(pdf_file, 'rb') as f:
-st.download_button(
-label="📥 Download Order Forms PDF",
-data=f.read(),
-file_name=pdf_file,
-mime='application/pdf',
-key="download_forms_pdf"
-)
-
-st.text_area("Output:", result, height=300)
-
-except Exception as e:
-st.error(f"Error: {str(e)}")
-else:
-st.warning("No school sheets found. Please run 'Update School Sheets' first.")
-
-except Exception as e:
-st.error(f"Error loading schools: {str(e)}")
+        st.subheader("📄 Generate Order Forms")
+        
+        # Get list of schools from spreadsheet
+        try:
+            import gspread
+            creds = scripts.get_credentials()
+            gc = gspread.authorize(creds)
+            spreadsheet = gc.open('MASTER SPRING 2026')
+            all_sheets = spreadsheet.worksheets()
+            school_sheets = [sheet.title.replace(' MASTER', '') for sheet in all_sheets if sheet.title.endswith(' MASTER') and sheet.title != 'MASTER']
+            
+            if school_sheets:
+                selected_school = st.selectbox(
+                    "Select School:",
+                    options=sorted(school_sheets),
+                    key="school_selector"
+                )
+                
+                if st.button("🖨️ Generate Order Forms", use_container_width=True, key="generate_forms"):
+                    with st.spinner(f"Generating order forms for {selected_school}..."):
+                        try:
+                            result, error, pdf_file = scripts.export_order_forms(selected_school)
+                            
+                            if error:
+                                st.error(f"Error: {error}")
+                            else:
+                                st.success(f"Order forms generated for {selected_school}!")
+                                
+                                if pdf_file and os.path.exists(pdf_file):
+                                    with open(pdf_file, 'rb') as f:
+                                        st.download_button(
+                                            label="📥 Download Order Forms PDF",
+                                            data=f.read(),
+                                            file_name=pdf_file,
+                                            mime='application/pdf',
+                                            key="download_forms_pdf"
+                                        )
+                            
+                            st.text_area("Output:", result, height=300)
+                            
+                        except Exception as e:
+                            st.error(f"Error: {str(e)}")
+            else:
+                st.warning("No school sheets found. Please run 'Update School Sheets' first.")
+                
+        except Exception as e:
+            st.error(f"Error loading schools: {str(e)}")
+        
+        st.markdown("---")
         
         st.markdown("---")
         
@@ -175,4 +177,5 @@ st.error(f"Error loading schools: {str(e)}")
         st.markdown("---")
 
         st.markdown("**Need help?** Contact the administrator")
+
 
